@@ -1,0 +1,230 @@
+# Rate Limiter Service
+
+A production-grade standalone API rate limiter with Redis counters, PostgreSQL analytics, and a real-time dashboard.
+
+## Architecture
+
+```
+Client
+  │
+  ├── X-API-Key: your-key
+  ▼
+┌─────────────────────────────────────────┐
+│  Go HTTP Service (chi router)           │
+│                                         │
+│  Middleware Pipeline:                   │
+│  1. CORS + RealIP                       │
+│  2. Request Logger                      │
+│  3. Rate Limit Enforcer                 │
+│     ├── Resolve API key (Redis cache)   │
+│     ├── Find matching rule (PostgreSQL) │
+│     ├── Run algorithm (Redis Lua)       │
+│     └── Buffer event (async write)      │
+│  4. Handler                             │
+└────────────┬────────────────────────────┘
+             │
+     ┌───────┴───────┐
+     ▼               ▼
+  Redis 7         PostgreSQL 16
+  ─────────       ─────────────
+  • Counters      • API keys
+  • Key cache     • Rules
+  • Sliding sets  • Events (analytics)
+  • Token buckets • Tiers
+```
+
+## Algorithms
+
+| Strategy | Redis Data | Complexity | Best For |
+|---|---|---|---|
+| `fixed_window` | `INCR` + `EXPIRE` | O(1) | Simple, high-throughput |
+| `sliding_window` | `ZADD` sorted set | O(log N) | Precise limits, no boundary burst |
+| `token_bucket` | `HMSET` tokens+timestamp | O(1) | Allow short bursts, smooth refill |
+| `leaky_bucket` | Rolling average | O(1) | Smooth output rate |
+
+All algorithms are implemented as **atomic Lua scripts** in Redis — no race conditions.
+
+## Quickstart
+
+### Option A: Docker Compose (recommended)
+
+```bash
+git clone <repo>
+cd rate-limiter
+
+make docker-up       # Start Redis + PostgreSQL + Go service
+make seed            # Create sample API keys and rules
+make load-test       # Generate 500 requests for analytics data
+
+# Open dashboard
+open dashboard/index.html
+```
+
+### Option B: Local development
+
+```bash
+# Start dependencies
+docker run -d -p 6379:6379 redis:7-alpine
+docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ratelimiter postgres:16-alpine
+
+# Run the service
+export REDIS_URL=redis://localhost:6379/0
+export DATABASE_URL=postgres://postgres:postgres@localhost:5432/ratelimiter?sslmode=disable
+make run
+```
+
+## API Reference
+
+### Rate Limited Endpoints
+
+Any endpoint that requires `X-API-Key` header.
+
+```bash
+# Basic check
+curl -H "X-API-Key: demo-key-12345" http://localhost:8080/check
+
+# Response headers on every request:
+# X-RateLimit-Limit:     100
+# X-RateLimit-Remaining: 94
+# X-RateLimit-Reset:     1716998400  (unix timestamp)
+# X-Request-ID:          uuid
+
+# When rate limited (HTTP 429):
+# Retry-After: 30  (seconds)
+```
+
+### Admin API
+
+All admin endpoints require `X-Admin-Key` header.
+
+#### API Keys
+
+```bash
+# List all keys
+curl -H "X-Admin-Key: dev-admin-secret" http://localhost:8080/admin/keys
+
+# Create a key
+curl -X POST -H "X-Admin-Key: dev-admin-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"My App","tier_id":"tier-pro"}' \
+  http://localhost:8080/admin/keys
+
+# Disable a key (takes effect within 60s cache TTL)
+curl -X PUT -H "X-Admin-Key: dev-admin-secret" \
+  http://localhost:8080/admin/keys/{id}/disable
+```
+
+#### Rules
+
+```bash
+# Create a rule (endpoint-specific, sliding window)
+curl -X POST -H "X-Admin-Key: dev-admin-secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Search limit",
+    "api_key_id": "key-demo",
+    "endpoint": "/api/v1/search",
+    "strategy": "sliding_window",
+    "limit": 10,
+    "window_secs": 60
+  }' http://localhost:8080/admin/rules
+
+# Delete a rule
+curl -X DELETE -H "X-Admin-Key: dev-admin-secret" \
+  http://localhost:8080/admin/rules/{id}
+```
+
+**Rule Priority** (highest to lowest):
+1. Exact endpoint match (`/api/v1/search`)
+2. Wildcard rule for API key (no endpoint set)
+3. Global service default (`DEFAULT_LIMIT` env var)
+
+#### Analytics
+
+```bash
+# Summary by API key (last 24h)
+curl -H "X-Admin-Key: dev-admin-secret" \
+  "http://localhost:8080/admin/analytics/summary?hours=24"
+
+# Top endpoints by traffic
+curl -H "X-Admin-Key: dev-admin-secret" \
+  "http://localhost:8080/admin/analytics/endpoints?hours=1"
+
+# Time series (1-minute buckets, filter by key)
+curl -H "X-Admin-Key: dev-admin-secret" \
+  "http://localhost:8080/admin/analytics/timeseries?hours=1&api_key_id=key-demo"
+```
+
+## Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `SERVER_ADDR` | `:8080` | HTTP listen address |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
+| `DATABASE_URL` | `postgres://...` | PostgreSQL DSN |
+| `ADMIN_API_KEY` | `dev-admin-secret` | Admin endpoint auth |
+| `DEFAULT_LIMIT` | `100` | Fallback req/window |
+| `DEFAULT_WINDOW` | `60s` | Fallback window duration |
+| `DEFAULT_BURST` | `20` | Fallback burst size |
+| `ANALYTICS_FLUSH_INTERVAL` | `30s` | PostgreSQL write interval |
+
+## Production Considerations
+
+### Scaling
+- The service is stateless; run multiple instances behind a load balancer
+- Redis is the single source of truth for rate limit state — all instances share it
+- PostgreSQL receives async batched writes, not hot path
+
+### Performance
+- Redis Lua scripts are atomic — no compare-and-swap races
+- API key lookups are Redis-cached for 60s (avoids PostgreSQL on every request)
+- Analytics events are buffered in memory and flushed in batches of 500
+
+### Failure Modes
+- **Redis unavailable**: Fail open (allow all requests, log error)
+- **PostgreSQL unavailable**: Rate limiting still works; analytics writes are dropped
+- **Buffer overflow**: If event buffer fills (10k items), events are dropped with a warning log
+
+### Redis Key Schema
+```
+rl:fw:{api_key_id}:{endpoint}:{window_bucket}  # Fixed window counter
+rl:sw:{api_key_id}:{endpoint}                  # Sliding window sorted set
+rl:tb:{api_key_id}:{endpoint}                  # Token bucket hash
+apikey:{key_value}                             # API key cache (60s TTL)
+```
+
+## Dashboard
+
+Open `dashboard/index.html` directly in a browser. It connects to `http://localhost:8080`.
+
+Features:
+- Live request traffic charts (Chart.js)
+- Allow/block rate by API key
+- Top endpoints by traffic
+- API key management (create, enable, disable)
+- Rule management (create, delete)
+- Request tester with burst testing
+- API documentation
+
+## Project Structure
+
+```
+rate-limiter/
+├── cmd/server/main.go              # Entry point, graceful shutdown
+├── internal/
+│   ├── config/config.go            # Environment-based configuration
+│   ├── handlers/router.go          # Chi router, all HTTP handlers
+│   ├── middleware/ratelimit.go     # Core enforcement middleware + event buffer
+│   ├── models/models.go            # Domain types
+│   └── store/
+│       ├── redis.go                # Redis client + Lua scripts
+│       └── postgres.go             # PostgreSQL pool + queries + migrations
+├── dashboard/index.html            # Analytics dashboard SPA
+├── scripts/
+│   ├── seed.sh                     # Dev data seeder
+│   └── load_test.sh                # Traffic generator
+├── Dockerfile                      # Multi-stage build (scratch runtime)
+├── docker-compose.yml              # Full stack
+├── Makefile                        # Developer shortcuts
+└── go.mod
+```

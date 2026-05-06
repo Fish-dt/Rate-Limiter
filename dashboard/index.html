@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rate Limiter — Analytics Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d0f14;
+    --surface: #161921;
+    --surface2: #1e2230;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.12);
+    --text: #e8eaf0;
+    --muted: #7a8099;
+    --accent: #4f8ef7;
+    --accent2: #7c5ef7;
+    --green: #3ecf8e;
+    --red: #f75f5f;
+    --amber: #f7c35f;
+    --font: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
+  
+  /* Layout */
+  .layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+  
+  /* Sidebar */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 24px 0;
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+  .logo {
+    padding: 0 20px 24px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .logo-mark {
+    font-family: var(--font);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .logo-title { font-size: 15px; font-weight: 600; color: var(--text); }
+  .logo-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  
+  .nav-section { padding: 0 12px; margin-bottom: 4px; }
+  .nav-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 8px 8px 4px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+  }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { background: rgba(79,142,247,0.12); color: var(--accent); }
+  .nav-icon { font-size: 14px; width: 16px; text-align: center; }
+  
+  .sidebar-footer {
+    margin-top: auto;
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+  }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .status-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.err { background: var(--red); }
+  .status-text { font-size: 11px; color: var(--muted); }
+  
+  /* Main content */
+  .main { overflow-y: auto; }
+  
+  /* Topbar */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .page-title { font-size: 16px; font-weight: 600; }
+  .topbar-actions { display: flex; align-items: center; gap: 12px; }
+  .time-select {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    outline: none;
+    font-family: var(--sans);
+  }
+  .btn {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-size: 12px;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: var(--sans);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn:hover { background: rgba(255,255,255,0.08); border-color: var(--border2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #6a9ef9; }
+  .btn.danger { color: var(--red); border-color: rgba(247,95,95,0.3); }
+  .btn.sm { padding: 4px 10px; font-size: 11px; }
+  
+  /* Page content */
+  .content { padding: 24px 28px; }
+  
+  /* Metric cards */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .metric-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .metric-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .metric-card.blue::before { background: var(--accent); }
+  .metric-card.green::before { background: var(--green); }
+  .metric-card.red::before { background: var(--red); }
+  .metric-card.amber::before { background: var(--amber); }
+  .metric-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
+  .metric-value { font-size: 28px; font-weight: 700; font-family: var(--font); }
+  .metric-value.blue { color: var(--accent); }
+  .metric-value.green { color: var(--green); }
+  .metric-value.red { color: var(--red); }
+  .metric-value.amber { color: var(--amber); }
+  .metric-sub { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .metric-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-family: var(--font);
+  }
+  .metric-badge.up { background: rgba(62,207,142,0.12); color: var(--green); }
+  .metric-badge.down { background: rgba(247,95,95,0.12); color: var(--red); }
+  
+  /* Charts */
+  .charts-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .chart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .chart-title { font-size: 13px; font-weight: 600; }
+  .chart-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .chart-legend { display: flex; gap: 14px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+  canvas { max-height: 200px; }
+  
+  /* Tables */
+  .table-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+  .table-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .table-title { font-size: 13px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  td { padding: 12px 20px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    font-family: var(--font);
+    letter-spacing: 0.3px;
+  }
+  .badge.green { background: rgba(62,207,142,0.12); color: var(--green); }
+  .badge.red { background: rgba(247,95,95,0.12); color: var(--red); }
+  .badge.blue { background: rgba(79,142,247,0.12); color: var(--accent); }
+  .badge.amber { background: rgba(247,195,95,0.12); color: var(--amber); }
+  .badge.purple { background: rgba(124,94,247,0.12); color: var(--accent2); }
+  
+  .progress-bar {
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    overflow: hidden;
+    width: 80px;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+  
+  /* Tabs */
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+  .tab {
+    padding: 10px 16px;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    background: none;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    font-family: var(--sans);
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  
+  /* Section */
+  .section { display: none; }
+  .section.active { display: block; }
+  
+  /* Form */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-label { font-size: 11px; color: var(--muted); font-weight: 500; }
+  .form-input, .form-select {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    outline: none;
+    font-family: var(--sans);
+    transition: border-color 0.15s;
+  }
+  .form-input:focus, .form-select:focus { border-color: var(--accent); }
+  .form-input::placeholder { color: var(--muted); }
+  
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    padding: 24px;
+    width: 480px;
+    max-width: 90vw;
+  }
+  .modal-title { font-size: 15px; font-weight: 600; margin-bottom: 20px; }
+  .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+  
+  /* Empty state */
+  .empty { text-align: center; padding: 48px 20px; color: var(--muted); }
+  .empty-icon { font-size: 32px; margin-bottom: 12px; }
+  .empty-text { font-size: 14px; }
+  
+  /* Loading */
+  .loading { text-align: center; padding: 48px; color: var(--muted); font-size: 13px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid var(--border2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+  
+  /* Live indicator */
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .live-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    display: inline-block;
+    margin-right: 6px;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  
+  /* Code block */
+  .code-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    font-family: var(--font);
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: auto;
+  }
+  .code-block .hl { color: var(--accent); }
+  .code-block .str { color: var(--green); }
+  .code-block .cmt { color: var(--muted); font-style: italic; }
+  
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .metrics-grid { grid-template-columns: 1fr 1fr; }
+    .charts-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-mark">⬡ RL Service</div>
+      <div class="logo-title">Rate Limiter</div>
+      <div class="logo-sub">v1.0 · Production</div>
+    </div>
+    
+    <div class="nav-section">
+      <div class="nav-label">Monitoring</div>
+      <button class="nav-item active" onclick="showSection('dashboard')">
+        <span class="nav-icon">◈</span> Dashboard
+      </button>
+      <button class="nav-item" onclick="showSection('timeseries')">
+        <span class="nav-icon">⌇</span> Traffic
+      </button>
+      <button class="nav-item" onclick="showSection('endpoints')">
+        <span class="nav-icon">⊕</span> Endpoints
+      </button>
+    </div>
+    
+    <div class="nav-section" style="margin-top:16px">
+      <div class="nav-label">Management</div>
+      <button class="nav-item" onclick="showSection('keys')">
+        <span class="nav-icon">⊟</span> API Keys
+      </button>
+      <button class="nav-item" onclick="showSection('rules')">
+        <span class="nav-icon">⊞</span> Rules
+      </button>
+    </div>
+    
+    <div class="nav-section" style="margin-top:16px">
+      <div class="nav-label">Developer</div>
+      <button class="nav-item" onclick="showSection('docs')">
+        <span class="nav-icon">⊡</span> API Docs
+      </button>
+      <button class="nav-item" onclick="showSection('tester')">
+        <span class="nav-icon">▷</span> Test Tool
+      </button>
+    </div>
+    
+    <div class="sidebar-footer">
+      <div style="display:flex;align-items:center;margin-bottom:8px">
+        <span class="status-dot ok" id="redis-dot"></span>
+        <span class="status-text">Redis connected</span>
+      </div>
+      <div style="display:flex;align-items:center">
+        <span class="status-dot ok" id="pg-dot"></span>
+        <span class="status-text">PostgreSQL connected</span>
+      </div>
+    </div>
+  </aside>
+  
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title" id="page-title">Overview Dashboard</div>
+      </div>
+      <div class="topbar-actions">
+        <span style="font-size:11px;color:var(--muted)"><span class="live-dot"></span>Live</span>
+        <select class="time-select" id="time-range" onchange="refreshAll()">
+          <option value="1">Last 1 hour</option>
+          <option value="24" selected>Last 24 hours</option>
+          <option value="168">Last 7 days</option>
+        </select>
+        <button class="btn" onclick="refreshAll()">↻ Refresh</button>
+      </div>
+    </div>
+    
+    <div class="content">
+    
+      <!-- Dashboard Section -->
+      <div class="section active" id="section-dashboard">
+        <div class="metrics-grid" id="metrics-grid">
+          <div class="metric-card blue">
+            <div class="metric-label">Total Requests</div>
+            <div class="metric-value blue" id="m-total">—</div>
+            <div class="metric-sub">across all keys</div>
+          </div>
+          <div class="metric-card green">
+            <div class="metric-label">Allowed</div>
+            <div class="metric-value green" id="m-allowed">—</div>
+            <div class="metric-sub"><span class="metric-badge up" id="m-allow-rate">—%</span></div>
+          </div>
+          <div class="metric-card red">
+            <div class="metric-label">Blocked</div>
+            <div class="metric-value red" id="m-blocked">—</div>
+            <div class="metric-sub"><span class="metric-badge down" id="m-block-rate">—%</span></div>
+          </div>
+          <div class="metric-card amber">
+            <div class="metric-label">Active Keys</div>
+            <div class="metric-value amber" id="m-keys">—</div>
+            <div class="metric-sub">with traffic</div>
+          </div>
+        </div>
+        
+        <div class="charts-grid">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div>
+                <div class="chart-title">Request Traffic</div>
+                <div class="chart-sub">Allowed vs blocked over time</div>
+              </div>
+              <div class="chart-legend">
+                <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Allowed</div>
+                <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Blocked</div>
+              </div>
+            </div>
+            <canvas id="traffic-chart"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <div>
+                <div class="chart-title">Allow Rate by Key</div>
+                <div class="chart-sub">% allowed per API key</div>
+              </div>
+            </div>
+            <canvas id="donut-chart"></canvas>
+          </div>
+        </div>
+        
+        <div class="table-card">
+          <div class="table-header">
+            <div class="table-title">API Key Summary</div>
+            <span style="font-size:11px;color:var(--muted)" id="summary-updated"></span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Key Name</th>
+                <th>Total</th>
+                <th>Allowed</th>
+                <th>Blocked</th>
+                <th>Allow Rate</th>
+              </tr>
+            </thead>
+            <tbody id="summary-tbody">
+              <tr><td colspan="5" class="loading"><span class="spinner"></span>Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- Traffic Section -->
+      <div class="section" id="section-timeseries">
+        <div class="chart-card" style="margin-bottom:24px">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Request Volume Over Time</div>
+              <div class="chart-sub">1-minute buckets</div>
+            </div>
+            <select class="time-select" id="ts-key-filter" onchange="loadTimeSeries()">
+              <option value="">All keys</option>
+            </select>
+          </div>
+          <canvas id="ts-chart" style="max-height:300px"></canvas>
+        </div>
+      </div>
+      
+      <!-- Endpoints Section -->
+      <div class="section" id="section-endpoints">
+        <div class="table-card">
+          <div class="table-header">
+            <div class="table-title">Top Endpoints by Traffic</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Endpoint</th>
+                <th>Total Requests</th>
+                <th>Blocked</th>
+                <th>Block Rate</th>
+              </tr>
+            </thead>
+            <tbody id="endpoints-tbody">
+              <tr><td colspan="4" class="loading"><span class="spinner"></span>Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- API Keys Section -->
+      <div class="section" id="section-keys">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+          <button class="btn primary" onclick="openCreateKey()">+ New API Key</button>
+        </div>
+        <div class="table-card">
+          <div class="table-header">
+            <div class="table-title">API Keys</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Key</th>
+                <th>Tier</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="keys-tbody">
+              <tr><td colspan="6" class="loading"><span class="spinner"></span>Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- Rules Section -->
+      <div class="section" id="section-rules">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+          <button class="btn primary" onclick="openCreateRule()">+ New Rule</button>
+        </div>
+        <div class="table-card">
+          <div class="table-header">
+            <div class="table-title">Rate Limit Rules</div>
+            <span style="font-size:11px;color:var(--muted)">Higher priority: exact endpoint > wildcard > global default</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>API Key</th>
+                <th>Endpoint</th>
+                <th>Strategy</th>
+                <th>Limit</th>
+                <th>Window</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="rules-tbody">
+              <tr><td colspan="7" class="loading"><span class="spinner"></span>Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- API Docs Section -->
+      <div class="section" id="section-docs">
+        <div class="chart-card" style="margin-bottom:16px">
+          <div class="chart-title" style="margin-bottom:16px">Authentication</div>
+          <div class="code-block">
+<span class="cmt"># Every request to rate-limited endpoints must include an API key</span>
+<span class="hl">curl</span> -H <span class="str">"X-API-Key: your-api-key"</span> http://localhost:8080/check
+
+<span class="cmt"># Admin operations require the admin key</span>
+<span class="hl">curl</span> -H <span class="str">"X-Admin-Key: dev-admin-secret"</span> http://localhost:8080/admin/keys
+          </div>
+        </div>
+        <div class="chart-card" style="margin-bottom:16px">
+          <div class="chart-title" style="margin-bottom:16px">Rate Limit Response Headers</div>
+          <div class="code-block">
+X-RateLimit-Limit:     <span class="hl">100</span>        <span class="cmt"># max requests in window</span>
+X-RateLimit-Remaining: <span class="hl">94</span>         <span class="cmt"># requests left this window</span>
+X-RateLimit-Reset:     <span class="hl">1716998400</span> <span class="cmt"># unix timestamp of window reset</span>
+X-Request-ID:          <span class="hl">uuid</span>       <span class="cmt"># unique request identifier</span>
+
+<span class="cmt"># When rate limited (HTTP 429):</span>
+Retry-After: <span class="hl">30</span>                    <span class="cmt"># seconds to wait before retrying</span>
+          </div>
+        </div>
+        <div class="charts-grid">
+          <div class="chart-card">
+            <div class="chart-title" style="margin-bottom:12px">Create Rule</div>
+            <div class="code-block">POST /admin/rules
+
+{
+  <span class="str">"name"</span>:        <span class="str">"Search limit"</span>,
+  <span class="str">"api_key_id"</span>: <span class="str">"key-id"</span>,
+  <span class="str">"endpoint"</span>:    <span class="str">"/api/v1/search"</span>,
+  <span class="str">"strategy"</span>:   <span class="str">"sliding_window"</span>,
+  <span class="str">"limit"</span>:       <span class="hl">50</span>,
+  <span class="str">"window_secs"</span>: <span class="hl">60</span>,
+  <span class="str">"burst_size"</span>:  <span class="hl">5</span>
+}</div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title" style="margin-bottom:12px">Strategies</div>
+            <table style="font-size:12px">
+              <thead><tr><th>Strategy</th><th>Best For</th></tr></thead>
+              <tbody>
+                <tr><td><span class="badge blue">fixed_window</span></td><td style="color:var(--muted)">Simple, fast. O(1)</td></tr>
+                <tr><td><span class="badge purple">sliding_window</span></td><td style="color:var(--muted)">Precise. O(log N)</td></tr>
+                <tr><td><span class="badge amber">token_bucket</span></td><td style="color:var(--muted)">Burst-friendly</td></tr>
+                <tr><td><span class="badge green">leaky_bucket</span></td><td style="color:var(--muted)">Smooth traffic</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Tester Section -->
+      <div class="section" id="section-tester">
+        <div class="chart-card" style="margin-bottom:16px">
+          <div class="chart-title" style="margin-bottom:16px">Request Tester</div>
+          <div class="form-grid" style="margin-bottom:16px">
+            <div class="form-group">
+              <label class="form-label">API Key</label>
+              <input class="form-input" id="test-key" value="demo-key-12345" placeholder="Your API key">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Endpoint</label>
+              <select class="form-select" id="test-endpoint">
+                <option>/check</option>
+                <option>/api/v1/data</option>
+                <option>/api/v1/search</option>
+                <option>/api/v1/submit</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
+            <button class="btn primary" onclick="sendTestRequest()">▷ Send Request</button>
+            <button class="btn" onclick="sendBurst(10)">⚡ Burst ×10</button>
+            <button class="btn" onclick="sendBurst(50)">⚡ Burst ×50</button>
+            <span style="font-size:11px;color:var(--muted)" id="test-status"></span>
+          </div>
+          <div id="test-results" style="display:grid;gap:8px;max-height:400px;overflow-y:auto"></div>
+        </div>
+      </div>
+      
+    </div>
+  </main>
+</div>
+
+<!-- Create Key Modal -->
+<div class="modal-overlay" id="create-key-modal">
+  <div class="modal">
+    <div class="modal-title">Create API Key</div>
+    <div style="display:grid;gap:12px">
+      <div class="form-group">
+        <label class="form-label">Name *</label>
+        <input class="form-input" id="new-key-name" placeholder="e.g. Mobile App">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <input class="form-input" id="new-key-desc" placeholder="Optional description">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tier</label>
+        <select class="form-select" id="new-key-tier">
+          <option value="tier-free">Free</option>
+          <option value="tier-pro" selected>Pro</option>
+          <option value="tier-enterprise">Enterprise</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('create-key-modal')">Cancel</button>
+      <button class="btn primary" onclick="createKey()">Create Key</button>
+    </div>
+  </div>
+</div>
+
+<!-- Create Rule Modal -->
+<div class="modal-overlay" id="create-rule-modal">
+  <div class="modal">
+    <div class="modal-title">Create Rate Limit Rule</div>
+    <div style="display:grid;gap:12px">
+      <div class="form-group">
+        <label class="form-label">Rule Name *</label>
+        <input class="form-input" id="new-rule-name" placeholder="e.g. Search strict limit">
+      </div>
+      <div class="form-group">
+        <label class="form-label">API Key ID *</label>
+        <select class="form-select" id="new-rule-key"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Endpoint (leave blank for wildcard)</label>
+        <input class="form-input" id="new-rule-endpoint" placeholder="/api/v1/search">
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Strategy</label>
+          <select class="form-select" id="new-rule-strategy">
+            <option value="fixed_window">Fixed Window</option>
+            <option value="sliding_window">Sliding Window</option>
+            <option value="token_bucket">Token Bucket</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Limit (requests)</label>
+          <input class="form-input" id="new-rule-limit" type="number" value="100">
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Window (seconds)</label>
+          <input class="form-input" id="new-rule-window" type="number" value="60">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Burst Size</label>
+          <input class="form-input" id="new-rule-burst" type="number" value="10">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('create-rule-modal')">Cancel</button>
+      <button class="btn primary" onclick="createRule()">Create Rule</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE_URL = 'http://localhost:8080';
+const ADMIN_KEY = 'dev-admin-secret';
+
+let trafficChart, donutChart, tsChart;
+let apiKeysCache = [];
+
+const pageTitles = {
+  dashboard: 'Overview Dashboard',
+  timeseries: 'Traffic Analysis',
+  endpoints: 'Endpoint Analytics',
+  keys: 'API Key Management',
+  rules: 'Rate Limit Rules',
+  docs: 'API Documentation',
+  tester: 'Request Tester'
+};
+
+function showSection(name) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('section-' + name).classList.add('active');
+  document.querySelector(`[onclick="showSection('${name}')"]`).classList.add('active');
+  document.getElementById('page-title').textContent = pageTitles[name];
+  
+  if (name === 'timeseries') loadTimeSeries();
+  if (name === 'endpoints') loadEndpoints();
+  if (name === 'keys') loadKeys();
+  if (name === 'rules') loadRules();
+}
+
+function hours() { return document.getElementById('time-range').value; }
+
+async function apiFetch(path, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (path.startsWith('/admin')) headers['X-Admin-Key'] = ADMIN_KEY;
+  try {
+    const res = await fetch(BASE_URL + path, { ...options, headers });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  } catch (e) {
+    console.error('API error:', path, e);
+    return null;
+  }
+}
+
+async function refreshAll() {
+  await Promise.all([loadSummary(), loadTrafficChart(), loadDonutChart()]);
+}
+
+async function loadSummary() {
+  const data = await apiFetch(`/admin/analytics/summary?hours=${hours()}`);
+  if (!data) return;
+  
+  let total = 0, allowed = 0, blocked = 0;
+  data.forEach(d => { total += d.total_requests; allowed += d.allowed_count; blocked += d.blocked_count; });
+  
+  document.getElementById('m-total').textContent = fmt(total);
+  document.getElementById('m-allowed').textContent = fmt(allowed);
+  document.getElementById('m-blocked').textContent = fmt(blocked);
+  document.getElementById('m-keys').textContent = data.length;
+  document.getElementById('m-allow-rate').textContent = total > 0 ? `${(allowed/total*100).toFixed(1)}%` : '—';
+  document.getElementById('m-block-rate').textContent = total > 0 ? `${(blocked/total*100).toFixed(1)}%` : '—';
+  document.getElementById('summary-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  
+  const tbody = document.getElementById('summary-tbody');
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:32px">No data in selected period. Run the load test to generate traffic.</td></tr>';
+    return;
+  }
+  
+  tbody.innerHTML = data.map(d => {
+    const rate = d.total_requests > 0 ? d.allowed_count / d.total_requests : 0;
+    const pct = (rate * 100).toFixed(1);
+    const color = rate > 0.9 ? 'var(--green)' : rate > 0.7 ? 'var(--amber)' : 'var(--red)';
+    return `<tr>
+      <td><strong>${esc(d.api_key_name)}</strong></td>
+      <td style="font-family:var(--font)">${fmt(d.total_requests)}</td>
+      <td style="color:var(--green);font-family:var(--font)">${fmt(d.allowed_count)}</td>
+      <td style="color:var(--red);font-family:var(--font)">${fmt(d.blocked_count)}</td>
+      <td>
+        <span style="display:inline-block;width:80px;height:4px;background:var(--surface2);border-radius:2px;vertical-align:middle;margin-right:8px;overflow:hidden">
+          <span style="display:block;height:100%;width:${pct}%;background:${color};border-radius:2px"></span>
+        </span>
+        <span style="font-family:var(--font);color:${color}">${pct}%</span>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadTrafficChart() {
+  const data = await apiFetch(`/admin/analytics/timeseries?hours=${hours()}`);
+  if (!data || !data.length) return;
+  
+  const labels = data.map(d => {
+    const t = new Date(d.time);
+    return t.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  });
+  
+  const ctx = document.getElementById('traffic-chart').getContext('2d');
+  if (trafficChart) trafficChart.destroy();
+  
+  trafficChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Allowed',
+          data: data.map(d => d.allowed),
+          borderColor: '#3ecf8e',
+          backgroundColor: 'rgba(62,207,142,0.08)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          borderWidth: 2
+        },
+        {
+          label: 'Blocked',
+          data: data.map(d => d.blocked),
+          borderColor: '#f75f5f',
+          backgroundColor: 'rgba(247,95,95,0.08)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          borderWidth: 2
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#7a8099', maxTicksLimit: 8, font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#7a8099', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+async function loadDonutChart() {
+  const data = await apiFetch(`/admin/analytics/summary?hours=${hours()}`);
+  if (!data || !data.length) return;
+  
+  const colors = ['#4f8ef7','#3ecf8e','#f7c35f','#f75f5f','#7c5ef7','#5ef7c3'];
+  const ctx = document.getElementById('donut-chart').getContext('2d');
+  if (donutChart) donutChart.destroy();
+  
+  donutChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: data.map(d => d.api_key_name),
+      datasets: [{
+        data: data.map(d => d.total_requests),
+        backgroundColor: data.map((_, i) => colors[i % colors.length]),
+        borderColor: '#161921',
+        borderWidth: 3
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: '#7a8099', font: { size: 10 }, boxWidth: 10, padding: 8 }
+        }
+      }
+    }
+  });
+}
+
+async function loadTimeSeries() {
+  const keyFilter = document.getElementById('ts-key-filter').value;
+  const data = await apiFetch(`/admin/analytics/timeseries?hours=${hours()}&api_key_id=${keyFilter}`);
+  if (!data) return;
+  
+  const labels = data.map(d => {
+    const t = new Date(d.time);
+    return t.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  });
+  
+  const ctx = document.getElementById('ts-chart').getContext('2d');
+  if (tsChart) tsChart.destroy();
+  
+  tsChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Allowed',
+          data: data.map(d => d.allowed),
+          backgroundColor: 'rgba(62,207,142,0.7)',
+          borderRadius: 2,
+          barThickness: 8
+        },
+        {
+          label: 'Blocked',
+          data: data.map(d => d.blocked),
+          backgroundColor: 'rgba(247,95,95,0.7)',
+          borderRadius: 2,
+          barThickness: 8
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: '#7a8099', font: { size: 11 }, boxWidth: 12 } }
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#7a8099', maxTicksLimit: 12, font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { stacked: true, ticks: { color: '#7a8099', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+async function loadEndpoints() {
+  const data = await apiFetch(`/admin/analytics/endpoints?hours=${hours()}`);
+  const tbody = document.getElementById('endpoints-tbody');
+  if (!data || !data.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:32px">No endpoint data yet</td></tr>';
+    return;
+  }
+  
+  tbody.innerHTML = data.map(e => {
+    const pct = (e.block_rate * 100).toFixed(1);
+    const color = e.block_rate < 0.1 ? 'var(--green)' : e.block_rate < 0.3 ? 'var(--amber)' : 'var(--red)';
+    return `<tr>
+      <td><code style="font-family:var(--font);font-size:12px;color:var(--accent)">${esc(e.endpoint)}</code></td>
+      <td style="font-family:var(--font)">${fmt(e.total_requests)}</td>
+      <td style="color:var(--red);font-family:var(--font)">${fmt(e.blocked_count)}</td>
+      <td><span style="color:${color};font-family:var(--font)">${pct}%</span></td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadKeys() {
+  const data = await apiFetch('/admin/keys');
+  apiKeysCache = data || [];
+  const tbody = document.getElementById('keys-tbody');
+  if (!data || !data.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">No API keys</td></tr>';
+    return;
+  }
+  
+  const tierNames = { 'tier-free': 'free', 'tier-pro': 'pro', 'tier-enterprise': 'enterprise' };
+  tbody.innerHTML = data.map(k => `<tr>
+    <td><strong>${esc(k.name)}</strong><br><span style="font-size:11px;color:var(--muted)">${esc(k.description)}</span></td>
+    <td><code style="font-family:var(--font);font-size:11px;color:var(--muted)">${esc(k.key.substring(0,16))}…</code></td>
+    <td><span class="badge blue">${tierNames[k.tier_id] || k.tier_id || '—'}</span></td>
+    <td><span class="badge ${k.enabled ? 'green' : 'red'}">${k.enabled ? 'active' : 'disabled'}</span></td>
+    <td style="color:var(--muted);font-size:12px">${new Date(k.created_at).toLocaleDateString()}</td>
+    <td>
+      <button class="btn sm ${k.enabled ? 'danger' : ''}" onclick="toggleKey('${k.id}', ${!k.enabled})">
+        ${k.enabled ? 'Disable' : 'Enable'}
+      </button>
+    </td>
+  </tr>`).join('');
+  
+  // Populate key filter in timeseries
+  const sel = document.getElementById('ts-key-filter');
+  sel.innerHTML = '<option value="">All keys</option>' + 
+    data.map(k => `<option value="${k.id}">${esc(k.name)}</option>`).join('');
+  
+  // Populate rule key dropdown
+  const ruleKey = document.getElementById('new-rule-key');
+  ruleKey.innerHTML = data.map(k => `<option value="${k.id}">${esc(k.name)}</option>`).join('');
+}
+
+async function loadRules() {
+  const data = await apiFetch('/admin/rules');
+  const tbody = document.getElementById('rules-tbody');
+  if (!data || !data.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px">No rules. Create one to override the global default.</td></tr>';
+    return;
+  }
+  
+  const stratColors = { fixed_window: 'blue', sliding_window: 'purple', token_bucket: 'amber', leaky_bucket: 'green' };
+  const keyMap = {};
+  apiKeysCache.forEach(k => keyMap[k.id] = k.name);
+  
+  tbody.innerHTML = data.map(r => `<tr>
+    <td><strong>${esc(r.name)}</strong></td>
+    <td style="color:var(--muted);font-size:12px">${esc(keyMap[r.api_key_id] || r.api_key_id)}</td>
+    <td><code style="font-family:var(--font);font-size:11px;color:var(--accent)">${r.endpoint || '<span style="color:var(--muted)">wildcard</span>'}</code></td>
+    <td><span class="badge ${stratColors[r.strategy] || 'blue'}">${r.strategy}</span></td>
+    <td style="font-family:var(--font)">${r.limit}</td>
+    <td style="font-family:var(--font)">${r.window_secs}s</td>
+    <td><button class="btn sm danger" onclick="deleteRule('${r.id}')">Delete</button></td>
+  </tr>`).join('');
+}
+
+async function toggleKey(id, enable) {
+  const action = enable ? 'enable' : 'disable';
+  await apiFetch(`/admin/keys/${id}/${action}`, { method: 'PUT' });
+  loadKeys();
+}
+
+async function deleteRule(id) {
+  if (!confirm('Delete this rule?')) return;
+  await apiFetch(`/admin/rules/${id}`, { method: 'DELETE' });
+  loadRules();
+}
+
+function openCreateKey() {
+  document.getElementById('create-key-modal').classList.add('open');
+}
+
+function openCreateRule() {
+  if (!apiKeysCache.length) loadKeys();
+  document.getElementById('create-rule-modal').classList.add('open');
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+async function createKey() {
+  const name = document.getElementById('new-key-name').value.trim();
+  if (!name) return;
+  
+  await apiFetch('/admin/keys', {
+    method: 'POST',
+    body: JSON.stringify({
+      name,
+      description: document.getElementById('new-key-desc').value,
+      tier_id: document.getElementById('new-key-tier').value
+    })
+  });
+  
+  closeModal('create-key-modal');
+  loadKeys();
+}
+
+async function createRule() {
+  const name = document.getElementById('new-rule-name').value.trim();
+  const apiKeyId = document.getElementById('new-rule-key').value;
+  const limit = parseInt(document.getElementById('new-rule-limit').value);
+  const windowSecs = parseInt(document.getElementById('new-rule-window').value);
+  
+  if (!name || !apiKeyId || !limit || !windowSecs) return;
+  
+  const endpoint = document.getElementById('new-rule-endpoint').value.trim() || null;
+  
+  await apiFetch('/admin/rules', {
+    method: 'POST',
+    body: JSON.stringify({
+      name,
+      api_key_id: apiKeyId,
+      endpoint,
+      strategy: document.getElementById('new-rule-strategy').value,
+      limit,
+      window_secs: windowSecs,
+      burst_size: parseInt(document.getElementById('new-rule-burst').value) || 10
+    })
+  });
+  
+  closeModal('create-rule-modal');
+  loadRules();
+}
+
+// Tester
+async function sendTestRequest() {
+  const key = document.getElementById('test-key').value;
+  const endpoint = document.getElementById('test-endpoint').value;
+  
+  const start = Date.now();
+  let status, headers = {};
+  
+  try {
+    const res = await fetch(BASE_URL + endpoint, {
+      headers: { 'X-API-Key': key }
+    });
+    status = res.status;
+    headers = {
+      limit: res.headers.get('x-ratelimit-limit'),
+      remaining: res.headers.get('x-ratelimit-remaining'),
+      reset: res.headers.get('x-ratelimit-reset'),
+      retryAfter: res.headers.get('retry-after')
+    };
+  } catch (e) {
+    status = 0;
+  }
+  
+  const latency = Date.now() - start;
+  const allowed = status === 200;
+  const el = document.createElement('div');
+  el.style.cssText = `display:flex;align-items:center;gap:12px;padding:8px 12px;background:var(--surface2);border-radius:6px;font-size:12px;border-left:2px solid ${allowed ? 'var(--green)' : 'var(--red)'}`;
+  el.innerHTML = `
+    <span class="badge ${allowed ? 'green' : 'red'}">${status}</span>
+    <code style="color:var(--accent);font-family:var(--font)">${endpoint}</code>
+    <span style="color:var(--muted)">Remaining: <strong style="color:var(--text)">${headers.remaining ?? '—'}</strong>/${headers.limit ?? '—'}</span>
+    <span style="color:var(--muted);margin-left:auto">${latency}ms</span>
+  `;
+  
+  const results = document.getElementById('test-results');
+  results.insertBefore(el, results.firstChild);
+  if (results.children.length > 20) results.removeChild(results.lastChild);
+}
+
+async function sendBurst(n) {
+  document.getElementById('test-status').textContent = `Sending ${n} requests...`;
+  const promises = Array.from({length: n}, () => sendTestRequest());
+  await Promise.all(promises);
+  document.getElementById('test-status').textContent = `Done! Sent ${n} requests.`;
+}
+
+// Utilities
+function fmt(n) {
+  if (n === undefined || n === null) return '0';
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function esc(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) overlay.classList.remove('open');
+  });
+});
+
+// Auto-refresh every 30 seconds
+setInterval(refreshAll, 30000);
+
+// Initial load
+refreshAll();
+</script>
+</body>
+</html>
