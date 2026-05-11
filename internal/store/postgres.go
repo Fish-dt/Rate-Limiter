@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
@@ -229,7 +230,7 @@ func (p *PostgresPool) InsertEvents(ctx context.Context, events []*models.Reques
 		return nil
 	}
 
-	batch := &pgxpool.Batch{}
+	batch := &pgx.Batch{}
 	// Use a batch insert
 	for _, e := range events {
 		batch.Queue(

@@ -13,17 +13,17 @@ echo "--- Creating API Keys ---"
 curl -s -X POST "$BASE_URL/admin/keys" \
   -H "X-Admin-Key: $ADMIN_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"Mobile Client","description":"iOS/Android app","tier_id":"tier-pro"}' | jq .
+  -d '{"name":"Mobile Client","description":"iOS/Android app","tier_id":"tier-pro"}' 
 
 curl -s -X POST "$BASE_URL/admin/keys" \
   -H "X-Admin-Key: $ADMIN_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"Partner Integration","description":"Third party partner","tier_id":"tier-enterprise"}' | jq .
+  -d '{"name":"Partner Integration","description":"Third party partner","tier_id":"tier-enterprise"}' 
 
 curl -s -X POST "$BASE_URL/admin/keys" \
   -H "X-Admin-Key: $ADMIN_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"Free Trial","description":"New user trial","tier_id":"tier-free"}' | jq .
+  -d '{"name":"Free Trial","description":"New user trial","tier_id":"tier-free"}' 
 
 echo ""
 echo "--- Creating Rules for demo key ---"
@@ -40,7 +40,7 @@ curl -s -X POST "$BASE_URL/admin/rules" \
     "limit": 10,
     "window_secs": 60,
     "burst_size": 2
-  }' | jq .
+  }' 
 
 # Token bucket for submit (allows short bursts)
 curl -s -X POST "$BASE_URL/admin/rules" \
@@ -54,7 +54,7 @@ curl -s -X POST "$BASE_URL/admin/rules" \
     "limit": 30,
     "window_secs": 60,
     "burst_size": 5
-  }' | jq .
+  }' 
 
 # Global fixed window for demo key
 curl -s -X POST "$BASE_URL/admin/rules" \
@@ -66,7 +66,7 @@ curl -s -X POST "$BASE_URL/admin/rules" \
     "strategy": "fixed_window",
     "limit": 100,
     "window_secs": 60
-  }' | jq .
+  }' 
 
 echo ""
 echo "✅ Seeding complete"
